@@ -1,0 +1,34 @@
+---
+# tasks file for mysql_ray
+- include: password.yml
+  when: ( is_standalone | default(False) ) or ( innodb_cluster | default(False) ) or
+        ( mysql_group_replication | default(False) ) or ( slave_monitor_replication | default(False) ) or
+        ( upgrade_server | default(False) ) or ( gather_information | default(False) ) or ( manage_mysql | default(False) )
+  tags: [present, show_slave, show_variables]
+
+- include: system_check.yml
+  when: is_standalone | default(False)
+
+- include: initial_start.yml
+  when: is_standalone | default(False)
+
+- include: initial_group_replication.yml
+  when: mysql_group_replication | default(False)
+
+- include: initial_innodb_cluster.yml
+  when: innodb_cluster | default(False)
+
+- include: initial_slave_monitor.yml
+  when: slave_monitor_replication | default(False)
+
+- include: upgrade_my_cnf.yml
+  when: upgrade_my_cnf | default(False)
+
+- include: upgrade_server.yml
+  when: upgrade_server | default(False)
+
+- include: mysql_info.yml
+  when: gather_information | default(False)
+
+- include: manage_variables.yml
+  when: manage_mysql | default(False)

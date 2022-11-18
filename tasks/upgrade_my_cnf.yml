@@ -1,0 +1,90 @@
+- name: Backing up the original my.cnf
+  copy:
+    src: "{{ etcdir }}/my_{{ mysql_port }}.cnf"
+    dest: "{{ etcdir }}/my_{{ mysql_port }}back.cnf"
+    owner: mysql
+    group: mysql
+    mode: 0644
+    backup: yes
+    remote_src: yes
+
+- name: Rendering mysql parameter file
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: mysql
+    group: mysql
+    mode: 0644
+  with_items:
+    - { src: 'my.cnf.j2', dest: "{{ etcdir }}/my_{{ mysql_port }}.cnf" }
+
+- name: Modify semisync parameter and clone parameter in my.cnf
+  replace:
+    path: "{{ etcdir }}/my_{{ mysql_port }}.cnf"
+    regexp: "{{ item.original }}"
+    replace: "{{ item.change }}"
+  with_items:
+#    - { original: '#rpl_semi_sync_slave_enabled = 1', change: 'rpl_semi_sync_slave_enabled = 1' }
+#    - { original: '#rpl_semi_sync_master_enabled = 1', change: 'rpl_semi_sync_master_enabled = 1' }
+#    - { original: '#rpl_semi_sync_master_timeout = 500', change: 'rpl_semi_sync_master_timeout = 500' }
+    - { original: '#clone_enable_compression = 1', change: 'clone_enable_compression = 1' }
+
+- name: Rendering bash file
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0744
+  with_items:
+    - { src: 'my.cnf_auto.sh.j2', dest: "{{ etcdir }}/my.cnf_auto.sh" }
+
+- name: Auto config my.cnf
+  shell: "sh -x {{ etcdir }}/my.cnf_auto.sh"
+
+- name: Remove my.cnf_auto.sh
+  file:
+    path: "{{ etcdir }}/my.cnf_auto.sh"
+    state: absent
+    remote_src: yes
+
+- name: Replace LimitNOFILE=42010
+  lineinfile:
+    dest: "/usr/lib/systemd/system/mysqld_{{ mysql_port }}.service"
+    regexp: "^LimitNOFILE"
+    line: "LimitNOFILE = 42010"
+
+- name: Force systemd to reread configs
+  systemd:
+    daemon_reload: yes
+
+- name: Restart mysql server
+  systemd:
+    name: mysqld_{{ mysql_port }}
+    state: restarted
+
+- name: Wait for MySql is running
+  pause: seconds=3
+  when: is_mgr | default(False)
+
+- name: Start group replication
+  shell: "{{ basedir }}/bin/mysql --login-path=mysql_{{ mysql_port }} -e 'start group_replication;'"
+  when: is_mgr | default(False)
+
+- name: Wait for group replication is online
+  pause: seconds=12
+  when: is_mgr | default(False)
+
+- name: Obtain the member status
+  shell: "{{ basedir }}/bin/mysql --login-path=mysql_{{ mysql_port }} < {{ shelldir }}/check.sql|grep MEMBER_STATE|awk '{print $2}'"
+  register: MEMBER_STATE
+  when: is_mgr | default(False)
+
+- name: Show the MEMBER_STATE
+  debug:
+    msg: "The member status of mysql on {{ ansible_hostname }} is {{ MEMBER_STATE.stdout }}"
+  when: is_mgr | default(False)
+
+- name: Check the member status
+  pause: seconds=5
+  when: is_mgr | default(False)

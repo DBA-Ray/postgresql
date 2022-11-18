@@ -1,0 +1,50 @@
+- name: Copy the latest mysql
+  copy:
+    src: "{{ mysql_upgrade_package }}"
+    dest: "{{ package_dir }}"
+
+- name: Decompression package
+  unarchive:
+    src: "{{ package_dir }}/{{ mysql_upgrade_package }}"
+    dest: "{{ package_dir }}"
+    remote_src: yes
+  run_once: True
+
+- name: Stop mysql server
+  systemd:
+    name: "mysqld_{{ mysql_port }}"
+    state: stopped
+
+- name: Copy the upgrade package
+  shell: "cp -rf {{ package_dir }}/{{ mysql_upgrade_version }}/* {{ basedir }}/"
+
+- name: Start mysql server
+  systemd:
+    name: "mysqld_{{ mysql_port }}"
+    state: started
+
+- name: Wait for MySql is running
+  pause: seconds=3
+  when: is_mgr | default(False)
+
+- name: Start group replication
+  shell: "{{ basedir }}/bin/mysql --login-path=mysql_{{ mysql_port }} -e 'start group_replication;'"
+  when: is_mgr | default(False)
+
+- name: Wait for group replication is online
+  pause: seconds=12
+  when: is_mgr | default(False)
+
+- name: Obtain the member status
+  shell: "{{ basedir }}/bin/mysql --login-path=mysql_{{ mysql_port }} < {{ shelldir }}/check.sql|grep MEMBER_STATE|awk '{print $2}'"
+  register: MEMBER_STATE
+  when: is_mgr | default(False)
+
+- name: Show the MEMBER_STATE
+  debug:
+    msg: "The member status of mysql on {{ ansible_hostname }} is {{ MEMBER_STATE.stdout }}"
+  when: is_mgr | default(False)
+
+- name: Check the member status
+  pause: seconds=5
+  when: is_mgr | default(False)

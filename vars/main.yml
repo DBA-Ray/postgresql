@@ -1,0 +1,23 @@
+---
+# vars file for mysql_ray
+packages:
+  - vim
+  - lrzsz
+  - telnet
+  - net-tools
+  - tree
+  - unzip
+  - libaio
+  - numactl
+  - perl-DBD-mysql
+  - expect
+  - MySQL-python
+  - mysql-shell
+  - zstd
+  - python2-dnf
+  - epel-release
+  - python-pip
+#  - mysql-community-libs-compat.x86_64
+
+vars_files:
+  - secrets.yml

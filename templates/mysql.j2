@@ -1,0 +1,16 @@
+{{ logdir }}/mysqld_{{ mysql_port }}.log {
+su root root
+missingok
+weekly
+dateext
+notifempty
+compress
+delaycompress
+create 0640 mysql mysql
+rotate 7
+postrotate
+mysql --login-path=mysql_{{ mysql_port }} -e "flush error logs;"
+sleep 7
+mysql --login-path=mysql_{{ mysql_port }} -e "flush error logs;"
+endscript
+}

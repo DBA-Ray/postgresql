@@ -1,0 +1,5 @@
+#!/bin/bash
+
+logfile={{ logdir }}/mysqld_{{ mysql_port }}.log
+
+tailf -200 $logfile

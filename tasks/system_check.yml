@@ -1,0 +1,49 @@
+
+- name: Copy the mysql-community.repo
+  copy: src=mysql-community.repo dest=/etc/yum.repos.d/mysql-community.repo
+
+- name: Enable mysql5.7 repo
+  copy: src=mysql-community.repo57 dest=/etc/yum.repos.d/mysql-community.repo
+  when: mysql57 | default(False)
+
+- name: Install base packages
+  yum:
+    name: "{{ packages }}"
+    state: latest
+
+- name: Install pexpect
+  pip:
+    name: pexpect
+    state: latest
+
+- name: Install the mysql repo
+  yum:
+    name: "{{ remote_repo }}"
+    state: present
+  register: repo
+  retries: 7
+  until: repo is succeeded
+
+- name: Stop mysql server
+  systemd:
+    name: "mysqld_{{ mysql_port }}"
+    state: stopped
+  when: whether_uninstall | default(False)
+
+- name: Remove existing mysql data directory and file
+  file:
+    path: "{{ item }}"
+    state: absent
+    remote_src: 'yes'
+  with_items:
+    - "{{ etcdir }}/my_{{ mysql_port }}.cnf"
+    - "{{ datadir }}"
+    - "{{ logdir }}/mysqld_{{ mysql_port }}.log"
+    - "{{ logdir }}/slow_{{ mysql_port }}.log"
+    - "{{ shelldir }}"
+  when: whether_uninstall | default(False)
+
+#- name: upgrade all packages
+#  yum:
+#    name: '*'
+#    state: latest

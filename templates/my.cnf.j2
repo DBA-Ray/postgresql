@@ -1,0 +1,228 @@
+[mysqld]
+
+# 二进制日志
+{% if delay_replication == True%}
+  skip-log-bin
+{% else %}
+  log_bin = mysql-bin
+  log_bin_index = mysql-bin.index
+{% endif %}
+  server_id = {{ server_id.stdout }}
+  binlog_format = row
+  #binlog_row_image = minimal #影响写入速度
+  binlog_expire_logs_seconds = 259200
+  binlog_transaction_dependency_tracking = WRITESET
+  binlog_order_commits = 0
+  binlog_checksum = CRC32
+  binlog_transaction_compression = 0
+  binlog_transaction_compression_level_zstd = 7 #（1-22）
+  transaction_write_set_extraction = XXHASH64 #以便在server收集写集合的同时将其记录到二进制日志。写集合基于每行的主键，并且是行更改后的唯一标识此标识将用于检测冲突。
+  sync_binlog = 1 #最安全，最多丢失一个事务，需要SSD磁盘，ext4格式
+  binlog_rows_query_log_events = 1
+  sql_require_primary_key = 1 #检查表中是否有主键
+
+# per_thread_buffers
+  join_buffer_size = 128M #处理逻辑是驱动表的一行和非驱动表联合查找，这时就可以将非驱动表放入join_buffer，不需要访问拥有并发保护机制的buffer_pool
+  sort_buffer_size = 2M #执行order by和group by分配，用于存储排序的中间结果，当分配空间大于2M时会使用mmap而不是malloc来进行内存分配，导致效率降低
+  read_rnd_buffer_size = 128M #当thread进行随机扫描数据时会首先扫描该buffer空间以避免更多的物理读，放大以使用MRR
+  read_buffer_size = 2M #当thread进行顺序扫描数据时会首先扫描该buffer空间以避免更多的物理读
+  binlog_cache_size = 2M #用于在事务期间保存对二进制日志的更改的内存缓冲区的大小
+  binlog_stmt_cache_size = 32k #用于在非事务期间保存对二进制日志的更改的内存缓冲区的大小
+
+# basic
+  basedir = {{ basedir }}
+  datadir = {{ datadir }}
+  tmpdir = {{ datadir }}
+  socket = {{ datadir }}/mysql.sock
+  mysqlx_socket = {{ datadir }}/mysqlx.sock
+  log-error = {{ logdir }}/mysqld_{{ mysql_port }}.log
+  loose_log_syslog = OFF
+  pid-file = {{ datadir }}/mysqld.pid
+  authentication_policy = mysql_native_password
+  report_host = {{ ansible_default_ipv4.address }}
+  port = {{ mysql_port }}
+  mysqlx_port = {{ mysqlx_port }}
+  character_set_server = utf8mb4
+  collation_server = utf8mb4_0900_ai_ci
+  lower_case_table_names = 1
+  auto_increment_offset = 1
+  auto_increment_increment = 1
+  #protocol_compression_algorithms = zstd #只允许zstd,proxysql会报错Invalid compression algorithm 'uncompressed'..
+  sql_mode={{ sql_mode }}
+
+# 日志时间戳改为系统
+  log_timestamps = system
+
+# repilication_settings
+  gtid_mode = on
+  enforce_gtid_consistency = true
+  master_info_repository = TABLE
+  relay_log_info_repository = TABLE
+{% if delay_replication == True or slave_monitor_replication == True %}
+  read_only = 1
+  replica_preserve_commit_order = off #异步复制可关闭
+{% else %}
+  read_only = 0
+  replica_preserve_commit_order = on #组复制必须开启
+{% endif %}
+  replica_parallel_type = logical_clock
+  replica_parallel_workers = {{ ansible_processor_vcpus * 4 }} #组复制必须每个节点一致
+  replica_pending_jobs_size_max = 1073741824
+  log_replica_updates = 1
+  relay_log = relay
+  relay_log_index = relay.index
+  replication_optimize_for_static_plugin_config = on #improve performance for semisynchronous replication
+  replication_sender_observe_commit_only = on #improve performance for semisynchronous replication
+
+# MGR group_replication 变量加上 "loose" ，则可写入 my.cnf 配置文件中。
+  plugin-load = group_replication.so;semisync_source.so;semisync_replica.so;mysql_clone.so
+  transaction_isolation = READ-COMMITTED
+  loose-group_replication_group_name = "{{ group_replication_group_name }}" #组的名字可以随便起,但不能用主机的GTID（为mgr高可用组起一个名字，这个名字一定要是uuid格式的，所有节点一致）
+  loose-group_replication_start_on_boot = off #启动后自动启动组复制。
+  loose-group_replication_bootstrap_group = off #为了避免每次启动自动引导具有相同名称的第二个组,所以设置为OFF。
+  loose-group_replication_local_address = "{{ ansible_default_ipv4.address }}:{{ mysql_port }}1" #写自己主机所在IP（mgr各实例之前都是要进行通信的，这个配置项设置的就是本实例所监听的ip：端口，不是MySQL对外提供服务的端口）
+  loose-group_replication_group_seeds = "172.21.0.4:33771,172.21.0.8:33771,172.21.0.28:33771" #各mgr实例所监听的ip:端口，所有节点一致
+  loose-group_replication_ip_allowlist = {{ ansible_default_ipv4.network }}/24
+  loose-group_replication_transaction_size_limit = 209715200 #0为不限制,最好是合理设计业务，限制在20M以下,不能大于1G
+  loose-group_replication_exit_state_action = OFFLINE_MODE #离开小组后，失效成员关闭所有链接，并禁止没有 CONNECTION_ADMIN 或 SUPER 权限的用户建立新的连接
+  loose-group_replication_member_expel_timeout = 5 #从组中排除怀疑失败的成员之前等待的时间（以秒为单位）。在产生怀疑之前的最初 5 秒检测时间不计入该时间。最大为3600s
+  loose-group_replication_autorejoin_tries = 1 #每次尝试自动连接间隔5分钟，在被驱逐出组或者到达group_replication_unreachable_majority_timeout的时间触发
+  loose-group_replication_unreachable_majority_timeout = 3 #节点由ONLINE状态进入UNREACHABLE状态后等待的时间,如果仍保持UNREACHABLE，则将节点置为ERROR状态
+  loose-group_replication_message_cache_size= 1073741824 #可以容纳指定时间段以及初始5秒检测时间段内的XCom消息缓存，m默认1G
+  loose-group_replication_compression_threshold = 131072 #大于128K的有效负载的事务被压缩，减少网络带宽的压力,必须小于2113929216 bytes（1.965G）的数据包
+  loose-group_replication_recovery_compression_algorithms = zstd #压缩算法
+  loose-group_replication_recovery_zstd_compression_level = 7 #压缩级别，越大压缩力越大，比较消耗CPU和内存资源（1-22）
+  loose-group_replication_communication_max_message_size = 2097152 #压缩后的事务大于2M将对其分片，增加网络传输效率
+{% if ansible_hostname == primary_hostname %}
+  loose-group_replication_member_weight = 80
+{% else %}
+  loose-group_replication_member_weight = 60
+{% endif %}
+
+# semi replication
+  #rpl_semi_sync_source_timeout = 500
+  #rpl_semi_sync_replica_enabled = 1
+  #rpl_semi_sync_source_enabled = 1
+
+# 启用克隆压缩
+  loose-clone_enable_compression = 1
+  loose-clone_valid_donor_list = '{{ primary_hostname }}:{{ mysql_port }}'
+  loose-clone_max_concurrency = {{ ansible_processor_vcpus }}
+
+# 开启慢查询
+  long_query_time = 0.5
+  slow_query_log = 1
+  slow_query_log_file = {{ logdir }}/slow_{{ mysql_port }}.log
+  log_slow_extra = 0
+  log_queries_not_using_indexes = {{ log_queries_not_using_indexes }}
+  log_throttle_queries_not_using_indexes = 0
+  min_examined_row_limit = {{ min_examined_row_limit }}
+
+# 是否记录管理语句
+  log_slow_admin_statements = 0
+
+# 开启回收部分权限
+  partial_revokes = 1
+
+# 连接数优化
+  max_connections = {{ max_connections }}
+  max_connect_errors = {{ max_connections * 10 }} #允许同一主机连接请求失败最大值（超过之后mysql会阻止这台主机后续所有请求）
+  max_allowed_packet = 1072693248 #必须小于slave_max_allowed_packet的默认值1073741824（1G）
+
+# thread optimization
+  thread_cache_size = {{ max_connections // 100 + 8 }} #缓存线程数 default value: 8 + (max_connections / 100) maxvalue: 100
+
+# table缓存优化（最大并发数 * join语句涉及的表的最大个数）
+  table_open_cache = {{ max_connections * 3 }}  #所有线程打开表数
+  #table_definition_cache = 20000 #MIN（400 + table_open_cache / 2, 2000） #定义在高速缓冲中存储的表定义数量
+
+# 避免MySQL的外部锁定，减少出错几率增强稳定性。
+  skip_external_locking = 1 
+
+# innodb 优化
+  innodb_dedicated_server = 1
+  #innodb_buffer_pool_size = 25G #by innodb_dedicated_server
+{% if delay_replication == True %}
+  innodb_buffer_pool_size = {{ (ansible_memtotal_mb * 7) // 40960 }}G
+  innodb_log_files_in_group = 2 #by innodb_dedicated_server
+{% elif slave_monitor_replication == True %}
+  innodb_buffer_pool_size = {{ (ansible_memtotal_mb * 7) // 10240 }}G
+  innodb_log_files_in_group = 2 #by innodb_dedicated_server
+{% else %}
+  innodb_buffer_pool_size = {{ (ansible_memtotal_mb * 7) // 10240 }}G
+  #innodb_log_files_in_group = 2 #by innodb_dedicated_server
+{% endif %}
+  innodb_buffer_pool_instances = 8
+  innodb_log_buffer_size = 1073741824 #写入磁盘上日志文件的缓冲区的大小
+  #innodb_log_file_size = 1G #by innodb_dedicated_server
+  #innodb_flush_method = O_DIRECT_NO_FSYNC #避免双重缓冲，让数据库跳过文件系统缓冲直接和设备进行交互，SSD必选 by innodb_dedicated_server
+  innodb_open_files = {{ max_connections * 3 }} #保持打开ibd文件最大值，随table_open_cache变化
+  innodb_io_capacity = {{ innodb_io_capacity }}  #InnoDB后台任务IOPS
+  innodb_io_capacity_max = {{ innodb_io_capacity * 10 }} #InnoDB后台任务IOPS最大值
+  innodb_flush_sync = 0 #To adhere to the I/O rate defined by the innodb_io_capacity setting
+  innodb_flush_neighbors = 0 #指定从缓冲池刷新页面是否也刷新相同范围内的其他脏页，SSD 0/HDD 1
+  innodb_use_native_aio = ON #指定是否使用Linux异步I/O子系统
+  innodb_log_compressed_pages = OFF #固态硬盘可以关闭
+{% if ansible_hostname == primary_hostname and ( ansible_processor_vcpus // 2 ) <= 32 %}
+  innodb_read_io_threads = {{ ( ansible_processor_vcpus * 2 ) // 10 + 1}}
+  innodb_write_io_threads = {{ ( ansible_processor_vcpus * 8 ) // 10 }}
+{% elif ansible_hostname == primary_hostname and ( ansible_processor_vcpus // 2 ) > 32 %}
+  innodb_read_io_threads = {{ ansible_processor_vcpus - 64 }}
+  innodb_write_io_threads = 64 
+{% elif ansible_hostname != primary_hostname and ( ansible_processor_vcpus // 2 ) <= 32 %}
+  innodb_read_io_threads = {{ ( ansible_processor_vcpus * 8 ) // 10 }}
+  innodb_write_io_threads = {{ ( ansible_processor_vcpus * 2 ) // 10 + 1}}
+{% elif ansible_hostname != primary_hostname and ( ansible_processor_vcpus // 2 ) > 32 %}
+  innodb_read_io_threads = 64
+  innodb_write_io_threads = {{ ansible_processor_vcpus - 64 }}
+{% endif %}
+  innodb_thread_concurrency = 0
+  innodb_parallel_read_threads = {{ ansible_processor_vcpus }}
+  innodb_page_cleaners = 64 #从缓冲池实例中清除脏页的页清除器线程数，执行刷新列表和LRU刷新
+  innodb_purge_threads = 32  #清除线程数
+  innodb_lock_wait_timeout = 1 #InnoDB事务在放弃之前等待行锁定的秒数（行锁）
+  innodb_rollback_on_timeout = on #开启事务全部回滚
+  innodb_numa_interleave = 1         #启用NUMA交错内存策略以分配InnoDB缓冲池
+  #large_pages = 1                    #启用大页内存
+  innodb_online_alter_log_max_size = 1G #指定InnoDB表的在线DDL操作期间使用的临时日志文件大小的上限（超过将失效回滚）
+  innodb_stats_persistent_sample_pages = 128 #估计索引列的基数和其他统计信息时要采样的索引页数
+  innodb_sort_buffer_size = 67108864 #创建索引时排序缓冲区大小（64MB）
+{% if ansible_hostname == primary_hostname %}
+  innodb_change_buffer_max_size = 50
+{% else %}
+  innodb_change_buffer_max_size = 5
+{% endif %}
+  innodb_ddl_threads = 8 
+  innodb_ddl_buffer_size = 4294967295
+  innodb_monitor_enable = all
+
+# 临时表优化
+  tmp_table_size = {{ tmp_size }}
+  max_heap_table_size = {{ tmp_size }}
+  temptable_max_ram = {{ tmp_size }} #TempTable引擎的大小由参数temp_table_max_ram来控制，默认为1G。超过了则存储在磁盘上（ibtmp1）。
+
+# 是否开启死锁监测并记录至error_log
+  innodb_deadlock_detect = 0
+  innodb_print_all_deadlocks = 0
+
+# 关闭时间戳默认值
+  explicit_defaults_for_timestamp = 1
+
+# 安全加固
+  user = mysql
+  skip_name_resolve = 1 #生产环境中必须设置这个参数，否则反向解析缓慢时，会导致MySQL连接缓慢，出现严重的性能问题
+  local_infile = 1 #使用loadDump函数必备
+
+# 超时时间
+  wait_timeout = {{ timeout }}
+  interactive_timeout = {{ timeout }}
+
+[mysql]
+
+  socket = {{ datadir }}/mysql.sock
+  mysqlx_socket = {{ datadir }}/mysqlx.sock
+
+[client]
+
+  socket = {{ datadir }}/mysql.sock
+  mysqlx_socket = {{ datadir }}/mysqlx.sock
