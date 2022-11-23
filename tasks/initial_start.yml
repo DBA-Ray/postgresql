@@ -1,20 +1,13 @@
-#initial and start mysql server
-- name: Ensure group "mysql" exists
-  group:
-    name: mysql
-    state: present
+#initial and start postgresql server
+- name: Install base packages
+  yum:
+    name: "{{ packages }}"
+    state: latest
 
-- name: Ensure the user "mysql" exists
-  user:
-    name: mysql
-    group: mysql
 
-- name: Register the variable of server_id
-  shell: "sudo echo {{ ansible_default_ipv4['address'] }} | awk -F'.' '{print $4}'"
-  register: server_id
 
-- name: Create directories for mysql
-  file: path={{ item }} state=directory owner=mysql group=mysql
+- name: Create directories for postgresql
+  file: path={{ item }} state=directory owner=postgresql group=postgresql
   with_items:
     - "{{ package_dir }}"
     - "{{ shelldir }}"
@@ -25,12 +18,12 @@
     - "{{ logdir }}"
     - "{{ masterdir }}"
 
-- name: Copy mysql compressed package
+- name: Copy postgresql compressed package
   copy:
     src: "{{ package_name }}"
     dest: "{{ package_dir }}"
 
-- name: Uncompress mysql package to package dir
+- name: Uncompress postgresql package to package dir
   unarchive:
     src: "{{ package_dir }}/{{ package_name }}"
     dest: "{{ package_dir }}/"
@@ -38,14 +31,14 @@
 
 - name: Copy uncompressed package
   copy:
-    src: "{{ package_dir }}/{{ mysql_version }}/"
+    src: "{{ package_dir }}/{{ postgresql_version }}/"
     dest: "{{ basedir }}"
     remote_src: yes
 
 # - name: Chown privileges for volume directories
-#   file: path="{{ basedir }}" owner=mysql group=mysql recurse=yes
+#   file: path="{{ basedir }}" owner=postgresql group=postgresql recurse=yes
 
-- name: Add the mysql execution path to the environment variable
+- name: Add the postgresql execution path to the environment variable
   lineinfile:
     path: /etc/profile
     line: export PATH={{ basedir }}/bin:$PATH
@@ -55,30 +48,30 @@
 - name: Source profile
   shell: "source /etc/profile"
 
-- name: Rendering mysql parameter file
+- name: Rendering postgresql parameter file
   template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
-    owner: mysql
-    group: mysql
+    owner: postgresql
+    group: postgresql
     mode: 0644
   with_items:
-    - { src: 'mysql.conf.j2', dest: '/usr/lib/tmpfiles.d/mysql.conf' }
-    - { src: 'mysqld.service.j2', dest: '/usr/lib/systemd/system/mysqld_{{ mysql_port }}.service' }
-    - { src: 'my.cnf.j2', dest: "{{ etcdir }}/my_{{ mysql_port }}.cnf" }
+    - { src: 'postgresql.conf.j2', dest: '/usr/lib/tmpfiles.d/postgresql.conf' }
+    - { src: 'postgresqld.service.j2', dest: '/usr/lib/systemd/system/postgresqld_{{ postgresql_port }}.service' }
+    - { src: 'my.cnf.j2', dest: "{{ etcdir }}/my_{{ postgresql_port }}.cnf" }
 
-- name: Rendering mysql5.7 parameter file
+- name: Rendering postgresql5.7 parameter file
   template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
-    owner: mysql
-    group: mysql
+    owner: postgresql
+    group: postgresql
     mode: 0644
   with_items:
-    - { src: 'mysql.conf.j2', dest: '/usr/lib/tmpfiles.d/mysql.conf' }
-    - { src: 'mysqld.service57.j2', dest: '/usr/lib/systemd/system/mysqld_{{ mysql_port }}.service' }
-    - { src: 'my.cnf57.j2', dest: "{{ etcdir }}/my_{{ mysql_port }}.cnf" }
-  when: mysql57 | default(False)
+    - { src: 'postgresql.conf.j2', dest: '/usr/lib/tmpfiles.d/postgresql.conf' }
+    - { src: 'postgresqld.service57.j2', dest: '/usr/lib/systemd/system/postgresqld_{{ postgresql_port }}.service' }
+    - { src: 'my.cnf57.j2', dest: "{{ etcdir }}/my_{{ postgresql_port }}.cnf" }
+  when: postgresql57 | default(False)
 
 - name: Rendering bash file
   template:
@@ -89,7 +82,7 @@
     mode: 0744
   with_items:
     - { src: 'my.cnf_auto.sh.j2', dest: "{{ etcdir }}/my.cnf_auto.sh" }
-    - { src: 'see_log.sh.j2', dest: "{{ shelldir }}/see_log_{{ mysql_port }}.sh" }
+    - { src: 'see_log.sh.j2', dest: "{{ shelldir }}/see_log_{{ postgresql_port }}.sh" }
     - { src: 'asynchronous_connection_failover.sh.j2', dest: "{{ shelldir }}/asynchronous_connection_failover.sh" }
 
 - name: Auto config my.cnf
@@ -105,12 +98,12 @@
 #   shell: "sudo cat /tmp/user_whitelist.txt"
 #   register: user_whitelist
 
-- name: Initial mysql server
+- name: Initial postgresql server
   shell: "sudo {{ item }}"
   with_items:
-    - "{{ basedir }}/bin/mysqld --defaults-file={{ etcdir }}/my_{{ mysql_port }}.cnf --user=mysql --lower-case-table-names=1 \
+    - "{{ basedir }}/bin/postgresqld --defaults-file={{ etcdir }}/my_{{ postgresql_port }}.cnf --user=postgresql --lower-case-table-names=1 \
     --initialize-insecure --basedir={{ basedir }} --datadir={{ datadir }}"
-    - "{{ basedir }}/bin/mysql_ssl_rsa_setup --datadir={{ datadir }}"
+    - "{{ basedir }}/bin/postgresql_ssl_rsa_setup --datadir={{ datadir }}"
 
 - name: Clean system's buffer and cache
   sysctl:
@@ -122,46 +115,46 @@
   systemd:
     daemon_reload: yes
 
-- name: Start mysql server
+- name: Start postgresql server
   systemd:
-    name: mysqld_{{ mysql_port }}
+    name: postgresqld_{{ postgresql_port }}
     state: started
 
-- name: Enable mysql server
+- name: Enable postgresql server
   systemd:
-    name: mysqld_{{ mysql_port }}
+    name: postgresqld_{{ postgresql_port }}
     enabled: yes
 
-- name: Wait for MySql is running
+- name: Wait for postgresql is running
   pause: seconds=7
 
-- name: Create a symbolic link for "/tmp/mysql.sock"
+- name: Create a symbolic link for "/tmp/postgresql.sock"
   file:
-    src: "{{ datadir }}/mysql.sock"
-    dest: /tmp/mysql.sock
+    src: "{{ datadir }}/postgresql.sock"
+    dest: /tmp/postgresql.sock
     state: link
 
 - name: Modify root password
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password:
     login_host: localhost
     name: root
     password: "{{ root_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     priv: '*.*:ALL,GRANT'
     login_unix_socket: "{{ socket }}"
     state: present
 
 - name: Add root@127.0.0.1 user 
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: root
     password: "{{ root_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "127.0.0.1"
     priv: '*.*:ALL,GRANT'
     sql_log_bin: no
@@ -169,13 +162,13 @@
     state: present
 
 - name: Add remote root user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: root
     password: "{{ root_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "{{ ansible_default_ipv4.network }}/24"
     priv: '*.*:ALL,GRANT'
     sql_log_bin: no
@@ -183,13 +176,13 @@
     state: present
 
 - name: Add repl user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: repl
-    password: "{{ mysql_monitor_password }}"
+    password: "{{ postgresql_monitor_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "%"
     priv: '*.*:REPLICATION SLAVE,REPLICATION CLIENT,Execute,Process/PERFORMANCE_SCHEMA.*:SELECT/SYS.*:SELECT'
     sql_log_bin: no
@@ -197,13 +190,13 @@
     state: present
 
 - name: Add pmm user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: pmm
     password: "{{ pmm_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: 127.0.0.1
     priv: '*.*:SELECT,RELOAD,PROCESS,SUPER,REPLICATION CLIENT/PERFORMANCE_SCHEMA.*:SELECT,UPDATE,DELETE,DROP'
     sql_log_bin: no
@@ -211,13 +204,13 @@
     state: present
 
 - name: Add audit user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: audit
-    password: "{{ mysql_monitor_password }}"
+    password: "{{ postgresql_monitor_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "{{ ansible_default_ipv4.network }}/24"
     priv: '*.*:REPLICATION SLAVE,SUPER,REPLICATION CLIENT'
     sql_log_bin: no
@@ -225,13 +218,13 @@
     state: present
 
 - name: Add business user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: "{{ business_user }}"
     password: "{{ business_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "{{ ansible_default_ipv4.network }}/24"
     priv: "{{ business_user }}.*:SELECT,UPDATE,DELETE,INSERT"
     sql_log_bin: no
@@ -239,22 +232,22 @@
     state: present
 
 - name: Add global read only user
-  mysql_user:
+  postgresql_user:
     login_user: root
     login_password: "{{ root_password }}"
     name: global
     password: "{{ read_only_password }}"
     update_password: always
-    login_port: "{{ mysql_port }}"
+    login_port: "{{ postgresql_port }}"
     host: "{{ ansible_default_ipv4.network }}/24"
     priv: "*.*:SELECT"
     sql_log_bin: no
     login_unix_socket: "{{ socket }}"
     state: present
 
-- name: Case sensitive password string match for logining mysql
+- name: Case sensitive password string match for logining postgresql
   expect:
-    command: "{{ basedir }}/bin/mysql_config_editor set --login-path=mysql_{{ mysql_port }} --host=127.0.0.1 -P {{ mysql_port }} --user=root --password"
+    command: "{{ basedir }}/bin/postgresql_config_editor set --login-path=postgresql_{{ postgresql_port }} --host=127.0.0.1 -P {{ postgresql_port }} --user=root --password"
     responses:
       (?i)password: "{{ root_password }}"
       (?i)Continue: y
@@ -279,9 +272,9 @@
     - { src: 'check.sql.j2', dest: "{{ shelldir }}/check.sql" }
 
 - name: Execute mgr_monitor.sql
-  shell: "sudo {{ basedir }}/bin/mysql --login-path=mysql_{{ mysql_port }} < {{ shelldir }}/mgr_monitor_official.sql"
+  shell: "sudo {{ basedir }}/bin/postgresql --login-path=postgresql_{{ postgresql_port }} < {{ shelldir }}/mgr_monitor_official.sql"
 
-- name: Add logrotate for mysql error log
+- name: Add logrotate for postgresql error log
   template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
@@ -289,21 +282,21 @@
     group: root
     mode: 0640
   with_items:
-    - { src: 'mysql.j2', dest: '/etc/logrotate.d/mysql_{{ mysql_port }}'}
+    - { src: 'postgresql.j2', dest: '/etc/logrotate.d/postgresql_{{ postgresql_port }}'}
 
 - name: Add the job of logrotate for msyql error log
   cron:
-    name: "mysql_{{ mysql_port }} logrotate"
+    name: "postgresql_{{ postgresql_port }} logrotate"
     weekday: "6"
     minute: "55"
     hour: "23"
-    job: "/usr/sbin/logrotate -vf -s /var/lib/logrotate/logrotate.status /etc/logrotate.d/mysql_{{ mysql_port }} > /dev/null 2>&1 &"
+    job: "/usr/sbin/logrotate -vf -s /var/lib/logrotate/logrotate.status /etc/logrotate.d/postgresql_{{ postgresql_port }} > /dev/null 2>&1 &"
 
 # - name: Set some parameters
-#   mysql_variables:
+#   postgresql_variables:
 #     login_user: root
 #     login_password: "{{ root_password }}"
-#     login_port: "{{ mysql_port }}"
+#     login_port: "{{ postgresql_port }}"
 #     login_unix_socket: "{{ socket }}"
 #     variable: "{{ item.original }}"
 #     value: "{{ item.change }}"
@@ -313,12 +306,12 @@
 #     #- { original: 'rpl_semi_sync_master_timeout', change: '500' } #兼容8.0.25
 #     - { original: 'clone_enable_compression', change: '1' }
 #     #- { original: 'group_replication_start_on_boot', change: '1' }
-#     #目前组复制节点被操作系统KILL后再自动启动加入组复制会导致整个组复制无PRIMARY或者其他问题，需要人工介入修复，故不建议随mysql启动
-#   when: not mysql57
+#     #目前组复制节点被操作系统KILL后再自动启动加入组复制会导致整个组复制无PRIMARY或者其他问题，需要人工介入修复，故不建议随postgresql启动
+#   when: not postgresql57
 
 # - name: Modify semisync parameter and clone parameter in my.cnf
 #   replace:
-#     path: "{{ etcdir }}/my_{{ mysql_port }}.cnf"
+#     path: "{{ etcdir }}/my_{{ postgresql_port }}.cnf"
 #     regexp: "{{ item.original }}"
 #     replace: "{{ item.change }}"
 #   with_items:
@@ -327,4 +320,4 @@
 #     #- { original: '#rpl_semi_sync_master_timeout = 500', change: 'rpl_semi_sync_master_timeout = 500' }#兼容8.0.25
 #     - { original: '#clone_enable_compression = 1', change: 'clone_enable_compression = 1' }
 #     #- { original: 'loose-group_replication_start_on_boot = off', change: 'loose-group_replication_start_on_boot = on' }
-#   when: not mysql57
+#   when: not postgresql57

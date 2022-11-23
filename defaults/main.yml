@@ -2,16 +2,13 @@
 env: dev1
 # Which hosts to deploy
 deploy_hosts: "slave1_{{ env }}"
-# primary hostname for mgr
-mutli_primary: false
-primary_hostname: "mgr1_{{ env }}"
-mgr_group: "mgr_{{ env }}"
+
 # Repo info
-remote_repo: https://dev.mysql.com/get/mysql80-community-release-el7-3.noarch.rpm
+remote_repo: https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
 # Basic parameters
 group_replication_group_name: d8d31564-b93c-11ec-a0bd-fa163eba97fa
-mysql_port: 3377
-mysqlx_port: 33770
+postgresql_port: 3377
+postgresqlx_port: 33770
 max_connections: 10000
 innodb_io_capacity: 10000
 timeout: 28800
@@ -25,27 +22,28 @@ slave_monitor_replication: false
 # business info
 business_user: hlzd
 # Directory path
-mysql_upgrade_version: mysql-8.0.31-el7-x86_64
-mysql_upgrade_package: "{{ mysql_upgrade_version }}.tar.gz"
-mysql_version: mysql-8.0.31-el7-x86_64
-package_name: "{{ mysql_version }}.tar.gz"
+postgresql_upgrade_version: postgresql15
+postgresql_upgrade_package: "{{ postgresql_upgrade_version }}.tar.gz"
+postgresql_version: postgresql12
+pgpool_version: pgpool-II-12-extensions
+package_name: "{{ postgresql_version }}.tar.gz"
 whether_remount_data_disk: False
 fstab_src: /dev/vdb1
 install_dir: /data
 package_dir: "{{ install_dir }}/package"
-basedir: "{{ install_dir }}/mysql"
+basedir: "{{ install_dir }}/{{ postgresql_version }}"
 shelldir: "{{ install_dir }}/shell"
 monitordir: "{{ install_dir }}/monitor"
-datadir: "{{ basedir }}/data_{{ mysql_port }}"
+datadir: "{{ basedir }}/data_{{ postgresql_port }}"
 etcdir: "{{ basedir }}/etc"
 logdir: "{{ basedir }}/log"
 masterdir: "{{ basedir }}/master"
-socket: "{{ datadir }}/mysql.sock"
-routerdir: "{{ install_dir }}/mysqlrouter_{{ mysql_port }}"
-# defaults file for manage_mysql
+socket: "{{ datadir }}/postgresql.sock"
+routerdir: "{{ install_dir }}/postgresqlrouter_{{ postgresql_port }}"
+# defaults file for manage_postgresql
 # basic
-socket: /data/mysql/data_{{ mysql_port }}/mysql.sock
-# mysql_info.yml
+socket: /data/postgresql/data_{{ postgresql_port }}/postgresql.sock
+# postgresql_info.yml
 # Allowable values are version, databases, settings, users, slave_status, slave_hosts, master_status, engines.
 # By default, collects all subsets.
 filter:
